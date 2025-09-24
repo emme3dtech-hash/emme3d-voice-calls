@@ -81,13 +81,12 @@ app.post('/api/make-ai-call', async (req, res) => {
 
     // Создаем звонок через Twilio
 const call = await client.calls.create({
-  url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
   to: `sip:${phone_number}@sip.zadarma.com`,
   from: `sip:+380914811639@380914811639.sip.twilio.com`,
   sipAuthUsername: process.env.ZADARMA_SIP_USER,
   sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+  url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
   statusCallback: `${BASE_URL}/call-status`,
-  statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
   record: true
 });
 
@@ -480,7 +479,55 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET /api/active-calls - Активные звонки');
   console.log('  GET /health - Статус системы');
 });
+// === ОБРАБОТКА SIP ВЫЗОВОВ ОТ ZADARMA ===
+app.post('/handle-sip-call', (req, res) => {
+  console.log('📞 Получен SIP вызов от Zadarma');
+  console.log('SIP Headers:', req.body);
+  
+  const callSid = req.body.CallSid;
+  const fromNumber = req.body.From; // номер от Zadarma
+  const customerName = req.query.name || '';
 
+  // Создаем контекст разговора
+  activeConversations.set(callSid, {
+    phone: fromNumber,
+    name: customerName,
+    messages: [],
+    startTime: new Date(),
+    stage: 'greeting',
+    provider: 'zadarma-sip'
+  });
+
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  // Приветственное сообщение на украинском
+  const greeting = generateGreeting(customerName);
+  twiml.say({
+    voice: 'Polly.Joanna',
+    language: 'uk-UA'
+  }, greeting);
+
+  // Ожидаем ответа клиента
+  const gather = twiml.gather({
+    speechTimeout: 'auto',
+    timeout: 10,
+    speechModel: 'experimental_conversations',
+    language: 'uk-UA',
+    enhanced: true,
+    action: '/process-customer-response',
+    method: 'POST'
+  });
+
+  twiml.say({
+    voice: 'Polly.Joanna',
+    language: 'uk-UA'
+  }, 'Дякую за увагу! Гарного дня!');
+  
+  twiml.hangup();
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
 
 
 
