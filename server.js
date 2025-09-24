@@ -49,7 +49,7 @@ app.get('/test', (req, res) => {
       'GET /health',
       'GET /test',
       'POST /api/make-ai-call',
-      'POST /api/bulk-ai-calls',
+      'POST /api/bulk-ai-',
       'POST /handle-outbound-call',
       'POST /process-customer-response'
     ]
@@ -80,14 +80,16 @@ app.post('/api/make-ai-call', async (req, res) => {
     console.log(`📞 Инициируем AI звонок на ${phone_number}`);
 
     // Создаем звонок через Twilio
-    const call = await client.calls.create({
-      url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
-      to: phone_number,
-      from: CALLER_ID,
-      statusCallback: `${BASE_URL}/call-status`,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      record: true
-    });
+const call = await client.calls.create({
+  url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+  to: `sip:${phone_number}@sip.zadarma.com`,
+  from: `sip:+380914811639@380914811639.sip.twilio.com`,
+  sipAuthUsername: process.env.ZADARMA_SIP_USER,
+  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+  statusCallback: `${BASE_URL}/call-status`,
+  statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+  record: true
+});
 
     console.log('✅ Звонок создан:', call.sid);
 
@@ -476,5 +478,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET /api/active-calls - Активные звонки');
   console.log('  GET /health - Статус системы');
 });
+
 
 
