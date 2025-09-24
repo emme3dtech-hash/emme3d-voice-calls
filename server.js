@@ -16,7 +16,7 @@ const BASE_URL = process.env.BASE_URL || 'https://emme3d-voice-calls-production.
 
 // Zadarma данные
 const ZADARMA_SIP_USER = process.env.ZADARMA_SIP_USER;
-const CALLER_ID = process.env.CALLER_ID || '+380997429246';
+const CALLER_ID = process.env.CALLER_ID || '+380914811639';
 
 // Инициализация сервисов
 const client = TWILIO_ACCOUNT_SID ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
@@ -273,7 +273,7 @@ function generateGreeting(customerName) {
 // === ГЕНЕРАЦИЯ AI ОТВЕТА ===
 async function generateAIResponse(conversation) {
   if (!openai) {
-    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380997429246.';
+    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380914811639.';
   }
 
   const systemPrompt = `Ти - Олена, менеджер по продажах компанії EMME3D (emme3d.com.ua), що спеціалізується на 3D-друці автозапчастин.
@@ -293,7 +293,7 @@ async function generateAIResponse(conversation) {
 - Швидке виготовлення: 1-3 дні
 - Висока якість друку PLA/ABS/PETG
 - Можемо зробити деталь по фото, кресленню або зразку
-- Телефон: +380997429246
+- Телефон: +380914811639
 - Сайт: emme3d.com.ua
 
 Стадія розмови: ${conversation.stage}
@@ -476,3 +476,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET /api/active-calls - Активные звонки');
   console.log('  GET /health - Статус системы');
 });
+
