@@ -412,8 +412,10 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
       try {
         const callResult = await client.calls.create({
           url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
-          to: contact.phone_number,
-          from: CALLER_ID,
+          to: `sip:${contact.phone_number}@sip.zadarma.com`,
+          from: `sip:+380914811639@380914811639.sip.twilio.com`,
+          sipAuthUsername: process.env.ZADARMA_SIP_USER,
+          sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
           statusCallback: `${BASE_URL}/call-status`
         });
 
@@ -478,6 +480,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET /api/active-calls - Активные звонки');
   console.log('  GET /health - Статус системы');
 });
+
 
 
 
