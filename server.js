@@ -408,13 +408,14 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
       const contact = contacts[i];
       
       try {
-        const callResult = await client.calls.create({
-          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
-          to: `sip:${contact.phone_number}@sip.zadarma.com`,
-          from: `sip:+380914811639@380914811639.sip.twilio.com`,
+        const call = await client.calls.create({
+          to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
+          from: `380914811639@380914811639.sip.twilio.com`,
           sipAuthUsername: process.env.ZADARMA_SIP_USER,
           sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-          statusCallback: `${BASE_URL}/call-status`
+          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+          statusCallback: `${BASE_URL}/call-status`,
+          record: true
         });
 
         results.push({
@@ -527,6 +528,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
