@@ -81,10 +81,10 @@ app.post('/api/make-ai-call', async (req, res) => {
 
     // Создаем звонок через Twilio
 const call = await client.calls.create({
-  to: `sip:${phone_number}@sip.zadarma.com`,
+  to: `sip:${phone_number}@pbx.zadarma.com`,  // pbx вместо sip
   from: `sip:+380914811639@380914811639.sip.twilio.com`,
-  sipAuthUsername: process.env.ZADARMA_SIP_USER,
-  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+  sipAuthUsername: '530513-100',
+  sipAuthPassword: 'vf4PUPLyi4',
   url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
   statusCallback: `${BASE_URL}/call-status`,
   record: true
@@ -528,6 +528,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
