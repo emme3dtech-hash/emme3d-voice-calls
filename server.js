@@ -82,7 +82,7 @@ app.post('/api/make-ai-call', async (req, res) => {
 // В функции app.post('/api/make-ai-call') замените создание звонка:
 const call = await client.calls.create({
   to: `sip:${phone_number}@pbx.zadarma.com`,
-  from: `sip:+380914811639@380914811639.sip.twilio.com`,
+  from: `sip:380914811639@380914811639.sip.twilio.com`,
   sipAuthUsername: '530513-100',
   sipAuthPassword: 'vf4PUPLyi4',
   url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
@@ -528,6 +528,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
