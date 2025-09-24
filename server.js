@@ -16,7 +16,7 @@ const BASE_URL = process.env.BASE_URL || 'https://emme3d-voice-calls-production.
 
 // Zadarma данные
 const ZADARMA_SIP_USER = process.env.ZADARMA_SIP_USER;
-const CALLER_ID = process.env.CALLER_ID || '+16105357813';
+const CALLER_ID = process.env.CALLER_ID || '+380934830890';
 
 // Инициализация сервисов
 const client = TWILIO_ACCOUNT_SID ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
@@ -274,7 +274,7 @@ function generateGreeting(customerName) {
 // === ГЕНЕРАЦИЯ AI ОТВЕТА ===
 async function generateAIResponse(conversation) {
   if (!openai) {
-    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +16105357813.';
+    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380934830890.';
   }
 
   const systemPrompt = `Ти - Олена, менеджер по продажах компанії EMME3D (emme3d.com.ua), що спеціалізується на 3D-друці автозапчастин.
@@ -529,6 +529,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
