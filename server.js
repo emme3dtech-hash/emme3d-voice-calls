@@ -344,6 +344,9 @@ app.post('/api/start-cold-calling-campaign', async (req, res) => {
 /**
  * Обрабатывает первоначальное соединение для холодного звонка
  */
+/**
+ * Обрабатывает первоначальное соединение для холодного звонка
+ */
 app.post('/handle-cold-call', (req, res) => {
     const { CallSid } = req.body;
     const { contact_id, phone, name } = req.query;
@@ -356,25 +359,24 @@ app.post('/handle-cold-call', (req, res) => {
         startTime: new Date(),
         stage: 'greeting'
     });
-
+    
     saveCallToSupabase(contact_id, CallSid, phone, name, 'in-progress', 'greeting');
 
     const twiml = new twilio.twiml.VoiceResponse();
     const greeting = `Привіт! Це Олена з компанії EMME3D. Ми друкуємо автозапчастини на 3D принтері. Вам зручно зараз розмовляти?`;
-
-    // ИСПРАВЛЕНО: Используем качественный украинский голос 'Lea'
-    twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, greeting);
-
+    
+    // ИЗМЕНЕНО: Используем качественный и однозначный голос от Google WaveNet
+    twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, greeting);
+    
     const gather = twiml.gather({
         speechTimeout: 'auto',
-        timeout: 10, // Увеличенный таймаут
+        timeout: 10,
         language: 'uk-UA',
         action: '/process-customer-response',
         method: 'POST'
     });
-
-    // ИСПРАВЛЕНО: Фраза на случай таймаута тоже на украинском голосе
-    twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Дякую за увагу. Гарного дня!');
+    
+    twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Дякую за увагу. Гарного дня!');
     twiml.hangup();
 
     res.type('text/xml');
@@ -398,30 +400,28 @@ app.post('/process-customer-response', async (req, res) => {
     }
 
     const twiml = new twilio.twiml.VoiceResponse();
-
+    
     try {
         if (!SpeechResult || Confidence < 0.4) {
-            // ИСПРАВЛЕНО: Голос 'Lea' для фразы "не расслышал"
-            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Вибачте, я вас не зрозуміла. Можете повторити?');
+            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Вибачте, я вас не зрозуміла. Можете повторити?');
         } else {
             conversation.messages.push({ role: 'user', content: SpeechResult });
             updateConversationStage(conversation, SpeechResult);
 
             const sessionId = `voice_${CallSid}`;
             const aiResponse = await callN8NAgent(SpeechResult, sessionId, conversation.phone, conversation.name);
-
+            
             conversation.messages.push({ role: 'assistant', content: aiResponse });
 
-            // ИСПРАВЛЕНО: Голос 'Lea' для основного ответа агента
-            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, aiResponse);
-
+            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, aiResponse);
+            
             if (shouldEndCall(aiResponse, conversation)) {
                 twiml.hangup();
                 await updateCallResult(conversation.phone, conversation);
                 activeConversations.delete(CallSid);
             }
         }
-
+        
         if (!twiml.response.Hangup) {
             twiml.gather({
                 speechTimeout: 'auto',
@@ -429,16 +429,14 @@ app.post('/process-customer-response', async (req, res) => {
                 language: 'uk-UA',
                 action: '/process-customer-response'
             });
-            // ИСПРАВЛЕНО: Голос 'Lea' для фразы на случай молчания
-            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Я вас не почула. Дякую за розмову, до побачення!');
+            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Я вас не почула. Дякую за розмову, до побачення!');
             twiml.hangup();
         }
 
         res.type('text/xml').send(twiml.toString());
     } catch (error) {
         console.error('❌ Ошибка обработки ответа клиента:', error);
-        // ИСПРАВЛЕНО: Голос 'Lea' для технической ошибки
-        twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Вибачте, виникла технічна помилка.');
+        twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Вибачте, виникла технічна помилка.');
         twiml.hangup();
         res.type('text/xml').send(twiml.toString());
     }
@@ -473,6 +471,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
 
