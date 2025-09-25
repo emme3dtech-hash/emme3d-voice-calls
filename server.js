@@ -56,6 +56,27 @@ app.get('/test', (req, res) => {
   });
 });
 
+// === НОРМАЛИЗАЦИЯ НОМЕРА ТЕЛЕФОНА ===
+function normalizePhoneNumber(phoneNumber) {
+  if (!phoneNumber) return '';
+  
+  // Убираем все нецифровые символы
+  let cleaned = phoneNumber.replace(/[^0-9]/g, '');
+  
+  // Убираем дублирование 380 в начале
+  if (cleaned.startsWith('380380')) {
+    cleaned = cleaned.substring(3);
+  }
+  
+  // Убираем лишние цифры если номер слишком длинный для украинского
+  if (cleaned.startsWith('380') && cleaned.length > 12) {
+    cleaned = cleaned.substring(0, 12);
+  }
+  
+  console.log(`Нормализация: "${phoneNumber}" → "${cleaned}"`);
+  return cleaned;
+}
+
 // === ОСНОВНАЯ ФУНКЦИЯ AI ЗВОНКА ===
 app.post('/api/make-ai-call', async (req, res) => {
   console.log('🔥 Получен запрос на AI звонок');
@@ -79,10 +100,15 @@ app.post('/api/make-ai-call', async (req, res) => {
 
     console.log(`📞 Инициируем AI звонок на ${phone_number}`);
     
-    // Очищаем номер от всех нецифровых символов
-    const cleanNumber = phone_number.replace(/[^0-9]/g, '');
-    console.log('Исходный номер:', phone_number);
-    console.log('Очищенный номер:', cleanNumber);
+    // Нормализуем номер
+    const cleanNumber = normalizePhoneNumber(phone_number);
+    
+    if (!cleanNumber) {
+      return res.status(400).json({ 
+        error: 'Некорректный номер телефона',
+        received_number: phone_number 
+      });
+    }
     
     const call = await client.calls.create({
       to: `sip:${cleanNumber}@pbx.zadarma.com`,
@@ -412,8 +438,17 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
     for (let i = 0; i < contacts.length; i++) {
       const contact = contacts[i];
       
-      // Очищаем номер от всех нецифровых символов
-      const cleanNumber = contact.phone_number.replace(/[^0-9]/g, '');
+      // Нормализуем номер
+      const cleanNumber = normalizePhoneNumber(contact.phone_number);
+      
+      if (!cleanNumber) {
+        results.push({
+          phone: contact.phone_number,
+          error: 'Некорректный номер телефона',
+          status: 'failed'
+        });
+        continue;
+      }
       
       try {
         const call = await client.calls.create({
