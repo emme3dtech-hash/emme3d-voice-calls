@@ -529,6 +529,10 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+console.log('🔍 Создаем звонок с параметрами:');
+console.log('TO:', `sip:${phone_number.replace('+', '')}@sip.zadarma.com`);
+console.log('FROM:', '+380914811639');
+console.log('Auth:', process.env.ZADARMA_SIP_USER);
 
 
 
