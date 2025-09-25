@@ -415,3 +415,40 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+// === ЭНДПОИНТ ДЛЯ ОДИНОЧНОГО AI ЗВОНКА ===
+app.post('/api/make-ai-call', async (req, res) => {
+    console.log('🔥 Получен запрос на одиночный AI звонок:', req.body);
+    try {
+        const { phone_number, customer_name } = req.body;
+        if (!phone_number) {
+            return res.status(400).json({ error: 'Параметр "phone_number" обязателен' });
+        }
+
+        const cleanNumber = normalizePhoneNumber(phone_number);
+        if (!cleanNumber) {
+            return res.status(400).json({ error: 'Некорректный формат номера телефона', received: phone_number });
+        }
+
+        console.log(`📞 Инициируем звонок на sip:${cleanNumber}@pbx.zadarma.com`);
+
+        const call = await client.calls.create({
+            to: `sip:${cleanNumber}@pbx.zadarma.com`,
+            from: CALLER_ID,
+            sipAuthUsername: ZADARMA_SIP_USER,
+            sipAuthPassword: ZADARMA_SIP_PASSWORD,
+            url: `${BASE_URL}/handle-cold-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}&contact_id=test_${Date.now()}`,
+            statusCallback: `${BASE_URL}/call-status`
+        });
+
+        console.log('✅ Звонок успешно создан:', call.sid);
+        res.json({
+            success: true,
+            call_sid: call.sid,
+            message: `AI звонок инициирован на ${phone_number}`
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка создания AI звонка:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
