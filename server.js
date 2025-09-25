@@ -355,7 +355,7 @@ app.post('/handle-cold-call', (req, res) => {
     saveCallToSupabase(contact_id, CallSid, phone, name, 'in-progress', 'greeting');
 
     const twiml = new twilio.twiml.VoiceResponse();
-    const greeting = `Здравствуйте! Это Елена из компании EMME3D. Мы печатаем автозапчасти на 3D принтере. Вам удобно сейчас разговаривать?`;
+    const greeting = `Здравствуйте! Это Василиса горячая шлюшка, будешь брать? Я вому с собой подружек!`;
     
     // ИЗМЕНЕНО: Используем стандартный, но надежный русский голос
     twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, greeting);
@@ -459,6 +459,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
 
