@@ -590,14 +590,24 @@ app.post('/process-customer-response', async (req, res) => {
 });
 
 // === ГЕНЕРАЦИЯ ПРИВЕТСТВИЯ ===
-function generateGreeting(customerName) {
-  const greetings = [
-    `Привіт${customerName ? `, ${customerName}` : ''}! Це Олена з компанії EMME3D. Ми друкуємо рідкісні автозапчастини на 3D принтері. У вас є хвилинка?`,
-    
-    `Доброго дня${customerName ? `, ${customerName}` : ''}! Дзвоню з EMME3D. Ми допомагаємо автовласникам знаходити рідкісні запчастини через 3D друк. Можу розказати більше?`
-  ];
+async function generateGreeting(customerName, callSid) {
+  // Используем n8n агента для генерации приветствия
+  const sessionId = `voice_${callSid}`;
+  const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми друкуємо рідкісні автозапчастини на 3D принтері. У вас є хвилинка?`;
   
-  return greetings[Math.floor(Math.random() * greetings.length)];
+  try {
+    const greeting = await callN8NAgent(
+      initialMessage,
+      sessionId,
+      'unknown', // phone будет установлен позже
+      customerName || 'Клиент'
+    );
+    return greeting;
+  } catch (error) {
+    console.error('❌ Ошибка генерации приветствия:', error);
+    // Fallback приветствие
+    return `Привіт${customerName ? `, ${customerName}` : ''}! Це Олена з EMME3D. Ми друкуємо автозапчастини. У вас є хвилинка?`;
+  }
 }
 
 // === ИНТЕГРАЦИЯ С N8N АГЕНТОМ ===
@@ -1057,41 +1067,51 @@ app.post('/handle-cold-call', async (req, res) => {
 
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Приветствие через n8n агента с контекстом холодного звонка
-  const sessionId = `cold_call_${callSid}`;
-  const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми спеціалізуємося на 3D друці автозапчастин. У вас є хвилинка поговорити?`;
-  
-  const greeting = await callN8NAgent(
-    initialMessage,
-    sessionId,
-    customerPhone,
-    customerName
-  );
+  try {
+    // Приветствие через n8n агента с контекстом холодного звонка
+    const sessionId = `cold_call_${callSid}`;
+    const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми спеціалізуємося на 3D друці автозапчастин. У вас є хвилинка поговорити?`;
+    
+    const greeting = await callN8NAgent(
+      initialMessage,
+      sessionId,
+      customerPhone,
+      customerName
+    );
 
-  twiml.say({
-    voice: 'Polly.Joanna-Neural',
-    language: 'uk-UA',
-    rate: '0.85' // Чуть медленнее для холодного звонка
-  }, greeting);
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA',
+      rate: '0.85' // Чуть медленнее для холодного звонка
+    }, greeting);
 
-  // Ожидаем ответа клиента с расширенными настройками
-  const gather = twiml.gather({
-    speechTimeout: 'auto',
-    timeout: 12, // Больше времени для ответа при холодном звонке
-    speechModel: 'experimental_conversations',
-    language: 'uk-UA',
-    enhanced: true,
-    action: '/process-cold-call-response',
-    method: 'POST'
-  });
+    // Ожидаем ответа клиента с расширенными настройками
+    const gather = twiml.gather({
+      speechTimeout: 'auto',
+      timeout: 12, // Больше времени для ответа при холодном звонке
+      speechModel: 'experimental_conversations',
+      language: 'uk-UA',
+      enhanced: true,
+      action: '/process-cold-call-response',
+      method: 'POST'
+    });
 
-  // Если клиент молчит долго
-  twiml.say({
-    voice: 'Polly.Joanna-Neural',
-    language: 'uk-UA'
-  }, 'Добре, зрозуміло. Дякую за час! Гарного дня!');
-  
-  twiml.hangup();
+    // Если клиент молчит долго
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Добре, зрозуміло. Дякую за час! Гарного дня!');
+    
+    twiml.hangup();
+
+  } catch (error) {
+    console.error('❌ Ошибка холодного звонка:', error);
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Вибачте, технічна проблема. До побачення!');
+    twiml.hangup();
+  }
 
   res.type('text/xml');
   res.send(twiml.toString());
