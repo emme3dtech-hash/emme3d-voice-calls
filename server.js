@@ -221,10 +221,10 @@ app.post('/api/make-ai-call', async (req, res) => {
         console.log(`📞 Инициируем звонок на sip:${cleanNumber}@pbx.zadarma.com`);
         
         const call = await client.calls.create({
-            to: `sip:${cleanNumber}@pbx.zadarma.com`,
+            to: phone_number, // ИЗМЕНЕНО: Просто передаем номер телефона
             from: CALLER_ID,
-            sipAuthUsername: ZADARMA_SIP_USER,
-            sipAuthPassword: ZADARMA_SIP_PASSWORD,
+            // sipAuthUsername: ZADARMA_SIP_USER, // ЗАКОММЕНТИРОВАНО
+            // sipAuthPassword: ZADARMA_SIP_PASSWORD, // ЗАКОММЕНТИРОВАНО
             url: `${BASE_URL}/handle-cold-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}&contact_id=test_${Date.now()}`,
             statusCallback: `${BASE_URL}/call-status`
         });
@@ -401,5 +401,6 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
