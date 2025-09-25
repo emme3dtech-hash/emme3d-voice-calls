@@ -16,7 +16,7 @@ const BASE_URL = process.env.BASE_URL || 'https://emme3d-voice-calls-production.
 
 // Zadarma данные
 const ZADARMA_SIP_USER = process.env.ZADARMA_SIP_USER;
-const CALLER_ID = process.env.CALLER_ID || '+380934830890';
+const CALLER_ID = process.env.CALLER_ID || '+380914811639';
 
 // Инициализация сервисов
 const client = TWILIO_ACCOUNT_SID ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
@@ -49,7 +49,7 @@ app.get('/test', (req, res) => {
       'GET /health',
       'GET /test',
       'POST /api/make-ai-call',
-      'POST /api/bulk-ai-',
+      'POST /api/bulk-ai-calls',
       'POST /handle-outbound-call',
       'POST /process-customer-response'
     ]
@@ -78,24 +78,31 @@ app.post('/api/make-ai-call', async (req, res) => {
     }
 
     console.log(`📞 Инициируем AI звонок на ${phone_number}`);
+    
+    // Очищаем номер от лишних символов
+    const cleanNumber = phone_number.replace(/[^0-9]/g, '');
+    console.log('Исходный номер:', phone_number);
+    console.log('Очищенный номер:', cleanNumber);
+    console.log('Итоговый SIP URI:', `sip:${cleanNumber}@pbx.zadarma.com`);
 
-// Вариант 1: Без домена в from
-const call = await client.calls.create({
-  to: `sip:${phone_number.replace('+', '')}@sip.zadarma.com`,
-  from: '+380914811639',  // обычный номер
-  sipAuthUsername: process.env.ZADARMA_SIP_USER,
-  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-  url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
-  statusCallback: `${BASE_URL}/call-status`,
-  record: true
-});
+    // Создаем звонок через Twilio + Zadarma SIP
+    const call = await client.calls.create({
+      to: `sip:${cleanNumber}@pbx.zadarma.com`,
+      from: `380914811639@380914811639.sip.twilio.com`,
+      sipAuthUsername: process.env.ZADARMA_SIP_USER,
+      sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+      url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+      statusCallback: `${BASE_URL}/call-status`,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      record: true
+    });
 
     console.log('✅ Звонок создан:', call.sid);
 
     res.json({
       success: true,
       call_sid: call.sid,
-      message: `AI звонок инициирован на ${phone_number}`,
+      message: `AI звонок инициирован на ${phone_number} с украинского номера +380914811639`,
       customer_name: customer_name,
       timestamp: new Date().toISOString()
     });
@@ -274,7 +281,7 @@ function generateGreeting(customerName) {
 // === ГЕНЕРАЦИЯ AI ОТВЕТА ===
 async function generateAIResponse(conversation) {
   if (!openai) {
-    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380934830890.';
+    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380914811639.';
   }
 
   const systemPrompt = `Ти - Олена, менеджер по продажах компанії EMME3D (emme3d.com.ua), що спеціалізується на 3D-друці автозапчастин.
@@ -409,9 +416,12 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
       const contact = contacts[i];
       
       try {
+        // Очищаем номер от лишних символов
+        const cleanNumber = contact.phone_number.replace(/[^0-9]/g, '');
+        
         const call = await client.calls.create({
-          to: `sip:${contact.phone_number.replace('+', '')}@sip.zadarma.com`,
-          from: '+380914811639',
+          to: `sip:${cleanNumber}@pbx.zadarma.com`,
+          from: `380914811639@380914811639.sip.twilio.com`,
           sipAuthUsername: process.env.ZADARMA_SIP_USER,
           sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
           url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
@@ -445,7 +455,8 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
     res.json({
       success: true,
       total_contacts: contacts.length,
-      results: results
+      results: results,
+      from_number: '+380914811639'
     });
 
   } catch (error) {
@@ -454,39 +465,13 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
   }
 });
 
-// === СТАТИСТИКА АКТИВНЫХ ЗВОНКОВ ===
-app.get('/api/active-calls', (req, res) => {
-  const calls = Array.from(activeConversations.entries()).map(([callSid, conv]) => ({
-    call_sid: callSid,
-    phone: conv.phone,
-    name: conv.name,
-    stage: conv.stage,
-    duration: Math.round((new Date() - conv.startTime) / 1000),
-    messages_count: conv.messages.length
-  }));
-
-  res.json({
-    active_calls: calls.length,
-    calls: calls
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
-  console.log('📞 Эндпоинты:');
-  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
-  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
-  console.log('  GET /api/active-calls - Активные звонки');
-  console.log('  GET /health - Статус системы');
-});
 // === ОБРАБОТКА SIP ВЫЗОВОВ ОТ ZADARMA ===
 app.post('/handle-sip-call', (req, res) => {
   console.log('📞 Получен SIP вызов от Zadarma');
   console.log('SIP Headers:', req.body);
   
   const callSid = req.body.CallSid;
-  const fromNumber = req.body.From; // номер от Zadarma
+  const fromNumber = req.body.From;
   const customerName = req.query.name || '';
 
   // Создаем контекст разговора
@@ -529,22 +514,31 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
-console.log('🔍 Создаем звонок с параметрами:');
-console.log('TO:', `sip:${phone_number.replace('+', '')}@sip.zadarma.com`);
-console.log('FROM:', '+380914811639');
-console.log('Auth:', process.env.ZADARMA_SIP_USER);
 
+// === СТАТИСТИКА АКТИВНЫХ ЗВОНКОВ ===
+app.get('/api/active-calls', (req, res) => {
+  const calls = Array.from(activeConversations.entries()).map(([callSid, conv]) => ({
+    call_sid: callSid,
+    phone: conv.phone,
+    name: conv.name,
+    stage: conv.stage,
+    duration: Math.round((new Date() - conv.startTime) / 1000),
+    messages_count: conv.messages.length
+  }));
 
+  res.json({
+    active_calls: calls.length,
+    calls: calls,
+    from_number: '+380914811639'
+  });
+});
 
-
-
-
-
-
-
-
-
-
-
-
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
+  console.log('📞 Эндпоинты:');
+  console.log('  POST /api/make-ai-call - Одиночный AI звонок с украинского номера');  
+  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
+  console.log('  GET /api/active-calls - Активные звонки');
+  console.log('  GET /health - Статус системы');
+});
