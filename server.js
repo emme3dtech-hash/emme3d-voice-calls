@@ -63,17 +63,27 @@ function normalizePhoneNumber(phoneNumber) {
   // Убираем все нецифровые символы
   let cleaned = phoneNumber.replace(/[^0-9]/g, '');
   
+  console.log(`Шаг 1 - убрали символы: "${phoneNumber}" → "${cleaned}"`);
+  
   // Убираем дублирование 380 в начале
   if (cleaned.startsWith('380380')) {
     cleaned = cleaned.substring(3);
+    console.log(`Шаг 2 - убрали дублирование: → "${cleaned}"`);
   }
   
-  // Убираем лишние цифры если номер слишком длинный для украинского
-  if (cleaned.startsWith('380') && cleaned.length > 12) {
-    cleaned = cleaned.substring(0, 12);
+  // Убираем код страны 380 для отправки в Zadarma (они сами его добавят)
+  if (cleaned.startsWith('380')) {
+    cleaned = cleaned.substring(3);
+    console.log(`Шаг 3 - убрали код страны: → "${cleaned}"`);
   }
   
-  console.log(`Нормализация: "${phoneNumber}" → "${cleaned}"`);
+  // Проверяем что остался украинский номер (9 цифр)
+  if (cleaned.length !== 9) {
+    console.log(`❌ Некорректная длина номера: ${cleaned.length} цифр`);
+    return '';
+  }
+  
+  console.log(`✅ Финальный номер для Zadarma: "${cleaned}"`);
   return cleaned;
 }
 
@@ -109,6 +119,8 @@ app.post('/api/make-ai-call', async (req, res) => {
         received_number: phone_number 
       });
     }
+    
+    console.log(`🎯 Отправляем звонок на: sip:${cleanNumber}@pbx.zadarma.com`);
     
     const call = await client.calls.create({
       to: `sip:${cleanNumber}@pbx.zadarma.com`,
