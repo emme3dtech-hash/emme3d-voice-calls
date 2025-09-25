@@ -49,7 +49,7 @@ app.get('/test', (req, res) => {
       'GET /health',
       'GET /test',
       'POST /api/make-ai-call',
-      'POST /api/bulk-ai-calls',
+      'POST /api/bulk-ai-',
       'POST /handle-outbound-call',
       'POST /process-customer-response'
     ]
@@ -78,31 +78,23 @@ app.post('/api/make-ai-call', async (req, res) => {
     }
 
     console.log(`📞 Инициируем AI звонок на ${phone_number}`);
-    
-    // Очищаем номер от лишних символов
-    const cleanNumber = phone_number.replace(/[^0-9]/g, '');
-    console.log('Исходный номер:', phone_number);
-    console.log('Очищенный номер:', cleanNumber);
-    console.log('Итоговый SIP URI:', `sip:${cleanNumber}@pbx.zadarma.com`);
 
-    // Создаем звонок через Twilio + Zadarma SIP
-    const call = await client.calls.create({
-      to: `sip:${cleanNumber}@pbx.zadarma.com`,
-      from: `380914811639@380914811639.sip.twilio.com`,
-      sipAuthUsername: process.env.ZADARMA_SIP_USER,
-      sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-      url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
-      statusCallback: `${BASE_URL}/call-status`,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      record: true
-    });
+// Вариант 1: Без домена в from
+const call = await client.calls.create({
+  to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
+  from: '+380914811639',  // обычный номер
+  sipAuthUsername: process.env.ZADARMA_SIP_USER,
+  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+  url: `${BASE_URL}/handle-outbound-call`,
+  record: true
+});
 
     console.log('✅ Звонок создан:', call.sid);
 
     res.json({
       success: true,
       call_sid: call.sid,
-      message: `AI звонок инициирован на ${phone_number} с украинского номера +380914811639`,
+      message: `AI звонок инициирован на ${phone_number}`,
       customer_name: customer_name,
       timestamp: new Date().toISOString()
     });
@@ -416,26 +408,23 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
       const contact = contacts[i];
       
       try {
-        // Очищаем номер от лишних символов
-        const cleanNumber = contact.phone_number.replace(/[^0-9]/g, '');
-        
         const call = await client.calls.create({
-          to: `sip:${cleanNumber}@pbx.zadarma.com`,
+          to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
           from: `380914811639@380914811639.sip.twilio.com`,
           sipAuthUsername: process.env.ZADARMA_SIP_USER,
           sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
+          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
           statusCallback: `${BASE_URL}/call-status`,
           record: true
         });
 
         results.push({
           phone: contact.phone_number,
-          call_sid: call.sid,
+          call_sid: callResult.sid,
           status: 'initiated'
         });
 
-        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${call.sid})`);
+        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${callResult.sid})`);
 
         // Пауза между звонками
         if (i < contacts.length - 1) {
@@ -455,8 +444,7 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
     res.json({
       success: true,
       total_contacts: contacts.length,
-      results: results,
-      from_number: '+380914811639'
+      results: results
     });
 
   } catch (error) {
@@ -465,13 +453,39 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
   }
 });
 
+// === СТАТИСТИКА АКТИВНЫХ ЗВОНКОВ ===
+app.get('/api/active-calls', (req, res) => {
+  const calls = Array.from(activeConversations.entries()).map(([callSid, conv]) => ({
+    call_sid: callSid,
+    phone: conv.phone,
+    name: conv.name,
+    stage: conv.stage,
+    duration: Math.round((new Date() - conv.startTime) / 1000),
+    messages_count: conv.messages.length
+  }));
+
+  res.json({
+    active_calls: calls.length,
+    calls: calls
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
+  console.log('📞 Эндпоинты:');
+  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
+  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
+  console.log('  GET /api/active-calls - Активные звонки');
+  console.log('  GET /health - Статус системы');
+});
 // === ОБРАБОТКА SIP ВЫЗОВОВ ОТ ZADARMA ===
 app.post('/handle-sip-call', (req, res) => {
   console.log('📞 Получен SIP вызов от Zadarma');
   console.log('SIP Headers:', req.body);
   
   const callSid = req.body.CallSid;
-  const fromNumber = req.body.From;
+  const fromNumber = req.body.From; // номер от Zadarma
   const customerName = req.query.name || '';
 
   // Создаем контекст разговора
@@ -513,32 +527,4 @@ app.post('/handle-sip-call', (req, res) => {
 
   res.type('text/xml');
   res.send(twiml.toString());
-});
-
-// === СТАТИСТИКА АКТИВНЫХ ЗВОНКОВ ===
-app.get('/api/active-calls', (req, res) => {
-  const calls = Array.from(activeConversations.entries()).map(([callSid, conv]) => ({
-    call_sid: callSid,
-    phone: conv.phone,
-    name: conv.name,
-    stage: conv.stage,
-    duration: Math.round((new Date() - conv.startTime) / 1000),
-    messages_count: conv.messages.length
-  }));
-
-  res.json({
-    active_calls: calls.length,
-    calls: calls,
-    from_number: '+380914811639'
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
-  console.log('📞 Эндпоинты:');
-  console.log('  POST /api/make-ai-call - Одиночный AI звонок с украинского номера');  
-  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
-  console.log('  GET /api/active-calls - Активные звонки');
-  console.log('  GET /health - Статус системы');
 });
