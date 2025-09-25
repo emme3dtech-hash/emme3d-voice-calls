@@ -81,11 +81,12 @@ app.post('/api/make-ai-call', async (req, res) => {
 
 // Вариант 1: Без домена в from
 const call = await client.calls.create({
-  to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
+  to: `sip:${phone_number.replace('+', '')}@sip.zadarma.com`,
   from: '+380914811639',  // обычный номер
   sipAuthUsername: process.env.ZADARMA_SIP_USER,
   sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-  url: `${BASE_URL}/handle-outbound-call`,
+  url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+  statusCallback: `${BASE_URL}/call-status`,
   record: true
 });
 
@@ -409,22 +410,22 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
       
       try {
         const call = await client.calls.create({
-          to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
-          from: `380914811639@380914811639.sip.twilio.com`,
+          to: `sip:${contact.phone_number.replace('+', '')}@sip.zadarma.com`,
+          from: '+380914811639',
           sipAuthUsername: process.env.ZADARMA_SIP_USER,
           sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
           statusCallback: `${BASE_URL}/call-status`,
           record: true
         });
 
         results.push({
           phone: contact.phone_number,
-          call_sid: callResult.sid,
+          call_sid: call.sid,
           status: 'initiated'
         });
 
-        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${callResult.sid})`);
+        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${call.sid})`);
 
         // Пауза между звонками
         if (i < contacts.length - 1) {
@@ -528,6 +529,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
