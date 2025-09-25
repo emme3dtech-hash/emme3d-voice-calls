@@ -136,28 +136,38 @@ async function callN8NAgent(userMessage, sessionId, customerPhone, customerName)
  */
 async function saveCallToSupabase(contactId, callSid, phone, name, status, stage = 'greeting') {
     try {
-        const updateData = {
+        // Готовим полный объект данных для создания или обновления
+        const callData = {
+            contact_id: contactId,
             call_sid: callSid,
+            phone_number: phone,
+            contact_name: name,
             call_status: status,
             conversation_state: stage,
             last_called_at: new Date().toISOString()
         };
 
-        const response = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?contact_id=eq.${contactId}`, {
-            method: 'PATCH',
+        // Используем POST для создания/обновления
+        const response = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts`, {
+            method: 'POST',
             headers: {
                 'apikey': supabaseKey,
                 'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates' // Магия UPSERT
             },
-            body: JSON.stringify(updateData)
+            body: JSON.stringify(callData)
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Детали ошибки от Supabase:', errorText);
             throw new Error(`Ошибка Supabase: ${response.statusText}`);
         }
-        console.log(`✅ Обновлена запись в Supabase для контакта ${contactId}`);
+
+        console.log(`✅ Запись для контакта ${contactId} сохранена/обновлена в Supabase`);
         return true;
+
     } catch (error) {
         console.error('❌ Ошибка сохранения в Supabase:', error);
         return false;
@@ -329,8 +339,13 @@ app.post('/api/start-cold-calling-campaign', async (req, res) => {
 /**
  * Обрабатывает первоначальное соединение для холодного звонка
  */
+// === ОБРАБОТЧИКИ TWILIO (TwiML) ===
+
+/**
+ * Обрабатывает первоначальное соединение для холодного звонка
+ */
 app.post('/handle-cold-call', (req, res) => {
-    const { CallSid, To, From } = req.body;
+    const { CallSid } = req.body;
     const { contact_id, phone, name } = req.query;
 
     console.log(`📞 Холодный звонок ${CallSid} контакту ${contact_id}: ${phone}`);
@@ -341,25 +356,25 @@ app.post('/handle-cold-call', (req, res) => {
         startTime: new Date(),
         stage: 'greeting'
     });
-    
-    // Асинхронно обновляем статус
+
     saveCallToSupabase(contact_id, CallSid, phone, name, 'in-progress', 'greeting');
 
     const twiml = new twilio.twiml.VoiceResponse();
-    // Начальное приветствие генерируется здесь, а не через n8n
-    const greeting = `Привіт! Привіт! це гарячі повії! Братимеш 2 за ціною однією?`;
-    
-    twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, greeting); // Используем качественный голос
-    
+    const greeting = `Привіт! Це Олена з компанії EMME3D. Ми друкуємо автозапчастини на 3D принтері. Вам зручно зараз розмовляти?`;
+
+    // ИСПРАВЛЕНО: Используем качественный украинский голос 'Lea'
+    twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, greeting);
+
     const gather = twiml.gather({
         speechTimeout: 'auto',
-        timeout: 5,
+        timeout: 10, // Увеличенный таймаут
         language: 'uk-UA',
         action: '/process-customer-response',
         method: 'POST'
     });
-    
-    twiml.say('Дякую за увагу. Гарного дня!');
+
+    // ИСПРАВЛЕНО: Фраза на случай таймаута тоже на украинском голосе
+    twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Дякую за увагу. Гарного дня!');
     twiml.hangup();
 
     res.type('text/xml');
@@ -370,7 +385,10 @@ app.post('/handle-cold-call', (req, res) => {
 /**
  * Обрабатывает ответ клиента и взаимодействует с n8n
  */
-app.post('/process-customer-response', async (req, res) => { // ИСПРАВЛЕНО: Добавлен async
+/**
+ * Обрабатывает ответ клиента и взаимодействует с n8n
+ */
+app.post('/process-customer-response', async (req, res) => {
     const { CallSid, SpeechResult, Confidence } = req.body;
     console.log(`🎤 Клиент сказал: "${SpeechResult}" (уверенность: ${Confidence})`);
 
@@ -380,45 +398,47 @@ app.post('/process-customer-response', async (req, res) => { // ИСПРАВЛЕ
     }
 
     const twiml = new twilio.twiml.VoiceResponse();
-    
+
     try {
         if (!SpeechResult || Confidence < 0.4) {
-            twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, 'Вибачте, я вас не зрозуміла. Можете повторити?');
+            // ИСПРАВЛЕНО: Голос 'Lea' для фразы "не расслышал"
+            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Вибачте, я вас не зрозуміла. Можете повторити?');
         } else {
             conversation.messages.push({ role: 'user', content: SpeechResult });
             updateConversationStage(conversation, SpeechResult);
 
             const sessionId = `voice_${CallSid}`;
             const aiResponse = await callN8NAgent(SpeechResult, sessionId, conversation.phone, conversation.name);
-            
+
             conversation.messages.push({ role: 'assistant', content: aiResponse });
 
-            twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, aiResponse);
-            
+            // ИСПРАВЛЕНО: Голос 'Lea' для основного ответа агента
+            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, aiResponse);
+
             if (shouldEndCall(aiResponse, conversation)) {
                 twiml.hangup();
-                // Финальное сохранение результата
                 await updateCallResult(conversation.phone, conversation);
                 activeConversations.delete(CallSid);
             }
         }
-        
-        // Если разговор не закончен, снова слушаем
+
         if (!twiml.response.Hangup) {
             twiml.gather({
                 speechTimeout: 'auto',
-                timeout: 5,
+                timeout: 10,
                 language: 'uk-UA',
                 action: '/process-customer-response'
             });
-            twiml.say('Я вас не почула. Дякую за розмову, до побачення!');
+            // ИСПРАВЛЕНО: Голос 'Lea' для фразы на случай молчания
+            twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Я вас не почула. Дякую за розмову, до побачення!');
             twiml.hangup();
         }
 
         res.type('text/xml').send(twiml.toString());
     } catch (error) {
         console.error('❌ Ошибка обработки ответа клиента:', error);
-        twiml.say('Вибачте, виникла технічна помилка.');
+        // ИСПРАВЛЕНО: Голос 'Lea' для технической ошибки
+        twiml.say({ voice: 'Polly.Lea', language: 'uk-UA' }, 'Вибачте, виникла технічна помилка.');
         twiml.hangup();
         res.type('text/xml').send(twiml.toString());
     }
@@ -453,6 +473,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
 
