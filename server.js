@@ -49,7 +49,7 @@ app.get('/test', (req, res) => {
       'GET /health',
       'GET /test',
       'POST /api/make-ai-call',
-      'POST /api/bulk-ai-',
+      'POST /api/bulk-ai-calls',
       'POST /handle-outbound-call',
       'POST /process-customer-response'
     ]
@@ -77,28 +77,22 @@ app.post('/api/make-ai-call', async (req, res) => {
       });
     }
 
-  console.log(`📞 Инициируем AI звонок на ${phone_number}`);
-  
-  // Очищаем номер от всех нецифровых символов
-  const cleanNumber = phone_number.replace(/[^0-9]/g, '');
-  console.log('Исходный номер:', phone_number);
-  console.log('Очищенный номер:', cleanNumber);
-  
-  const call = await client.calls.create({
-    to: `sip:${cleanNumber}@pbx.zadarma.com`,
-    from: '+380914811639',
-    sipAuthUsername: process.env.ZADARMA_SIP_USER,
-    sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-    url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
-    statusCallback: `${BASE_URL}/call-status`,
-    record: true
-  });
-  from: '+380914811639',  // обычный номер
-  sipAuthUsername: process.env.ZADARMA_SIP_USER,
-  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-  url: `${BASE_URL}/handle-outbound-call`,
-  record: true
-});
+    console.log(`📞 Инициируем AI звонок на ${phone_number}`);
+    
+    // Очищаем номер от всех нецифровых символов
+    const cleanNumber = phone_number.replace(/[^0-9]/g, '');
+    console.log('Исходный номер:', phone_number);
+    console.log('Очищенный номер:', cleanNumber);
+    
+    const call = await client.calls.create({
+      to: `sip:${cleanNumber}@pbx.zadarma.com`,
+      from: '+380914811639',
+      sipAuthUsername: process.env.ZADARMA_SIP_USER,
+      sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+      url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+      statusCallback: `${BASE_URL}/call-status`,
+      record: true
+    });
 
     console.log('✅ Звонок создан:', call.sid);
 
@@ -417,6 +411,8 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
     
     for (let i = 0; i < contacts.length; i++) {
       const contact = contacts[i];
+      
+      // Очищаем номер от всех нецифровых символов
       const cleanNumber = contact.phone_number.replace(/[^0-9]/g, '');
       
       try {
@@ -432,11 +428,11 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
 
         results.push({
           phone: contact.phone_number,
-          call_sid: callResult.sid,
+          call_sid: call.sid,
           status: 'initiated'
         });
 
-        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${callResult.sid})`);
+        console.log(`✅ Звонок инициирован: ${contact.phone_number} (${call.sid})`);
 
         // Пауза между звонками
         if (i < contacts.length - 1) {
@@ -482,15 +478,6 @@ app.get('/api/active-calls', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
-  console.log('📞 Эндпоинты:');
-  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
-  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
-  console.log('  GET /api/active-calls - Активные звонки');
-  console.log('  GET /health - Статус системы');
-});
 // === ОБРАБОТКА SIP ВЫЗОВОВ ОТ ZADARMA ===
 app.post('/handle-sip-call', (req, res) => {
   console.log('📞 Получен SIP вызов от Zadarma');
@@ -541,4 +528,12 @@ app.post('/handle-sip-call', (req, res) => {
   res.send(twiml.toString());
 });
 
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
+  console.log('📞 Эндпоинты:');
+  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
+  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
+  console.log('  GET /api/active-calls - Активные звонки');
+  console.log('  GET /health - Статус системы');
+});
