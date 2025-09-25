@@ -79,16 +79,15 @@ app.post('/api/make-ai-call', async (req, res) => {
 
     console.log(`📞 Инициируем AI звонок на ${phone_number}`);
 
-// В функции app.post('/api/make-ai-call') замените создание звонка:
-    const call = await client.calls.create({
-      to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
-      from: `380914811639@380914811639.sip.twilio.com`,
-      sipAuthUsername: process.env.ZADARMA_SIP_USER,
-      sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-      url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
-      statusCallback: `${BASE_URL}/call-status`,
-      record: true
-    });
+// Вариант 1: Без домена в from
+const call = await client.calls.create({
+  to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
+  from: '+380914811639',  // обычный номер
+  sipAuthUsername: process.env.ZADARMA_SIP_USER,
+  sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+  url: `${BASE_URL}/handle-outbound-call`,
+  record: true
+});
 
     console.log('✅ Звонок создан:', call.sid);
 
@@ -529,6 +528,7 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
 
 
