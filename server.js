@@ -1,4 +1,277 @@
-const express = require('express');
+// === СТАТИСТИКА КАМПАНИЙ ===
+app.get('/api/campaign-stats', async (req, res) => {
+  try {
+    const { campaign = null, date_from = null, date_to = null } = req.query;
+    
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase не настроен' });
+    }
+
+    // Базовый запрос статистики
+    let query = `${supabaseUrl}/rest/v1/cold_call_contacts?select=call_status,conversation_state,answered,interested,lead_score,call_duration,last_called_at`;
+    
+    if (campaign) query += `&campaign.eq.${campaign}`;
+    if (date_from) query += `&last_called_at.gte.${date_from}`;
+    if (date_to) query += `&last_called_at.lte.${date_to}`;
+
+    const response = await fetch(query, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    const data = await response.json();
+
+    // Подсчитываем статистику
+    const stats = {
+      total_contacts: data.length,
+      calls_made: data.filter(d => d.call_status).length,
+      answered: data.filter(d => d.answered).length,
+      interested: data.filter(d => d.interested).length,
+      rejections: data.filter(d => d.conversation_state === 'rejection').length,
+      callbacks_requested: data.filter(d => d.conversation_state === 'callback_requested').length,
+      orders_created: data.filter(d => d.conversation_state === 'order_process').length,
+      
+      // Средние показатели
+      avg_call_duration: Math.round(data.filter(d => d.call_duration > 0).reduce((sum, d) => sum + d.call_duration, 0) / data.filter(d => d.call_duration > 0).length) || 0,
+      avg_lead_score: Math.round(data.filter(d => d.lead_score > 0).reduce((sum, d) => sum + d.lead_score, 0) / data.filter(d => d.lead_score > 0).length) || 0,
+      
+      // Коэффициенты
+      answer_rate: data.length > 0 ? ((data.filter(d => d.answered).length / data.filter(d => d.call_status).length) * 100).toFixed(1) : 0,
+      interest_rate: data.length > 0 ? ((data.filter(d => d.interested).length / data.filter(d => d.answered).length) * 100).toFixed(1) : 0,
+      conversion_rate: data.length > 0 ? ((data.filter(d => d.conversation_state === 'order_process').length / data.filter(d => d.answered).length) * 100).toFixed(1) : 0,
+      
+      // Распределение по стадиям
+      stages: {
+        greeting: data.filter(d => d.conversation_state === 'greeting').length,
+        interested: data.filter(d => d.conversation_state === 'interested').length,
+        discussing_needs: data.filter(d => d.conversation_state === 'discussing_needs').length,
+        rejection: data.filter(d => d.conversation_state === 'rejection').length,
+        callback_requested: data.filter(d => d.conversation_state === 'callback_requested').length,
+        order_process: data.filter(d => d.conversation_state === 'order_process').length
+      }
+    };
+
+    res.json({
+      success: true,
+      campaign: campaign || 'Все кампании',
+      period: { date_from, date_to },
+      statistics: stats,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения статистики:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === УПРАВЛЕНИЕ КАМПАНИЯМИ ===
+app.post('/api/pause-campaign', async (req, res) => {
+  try {
+    // Останавливаем все активные звонки
+    const activeCalls = Array.from(activeConversations.keys());
+    
+    for (const callSid of activeCalls) {
+      try {
+        await client.calls(callSid).update({ status: 'completed' });
+        activeConversations.delete(callSid);
+        console.log(`⏸️ Остановлен звонок: ${callSid}`);
+      } catch (error) {
+        console.error(`❌ Ошибка остановки звонка ${callSid}:`, error);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Кампания приостановлена. Остановлено звонков: ${activeCalls.length}`,
+      stopped_calls: activeCalls.length
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка приостановки кампании:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
+  console.log('📞 Основные эндпоинты:');
+  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
+  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки');
+  console.log('  POST /api/start-cold-calling-campaign - Запуск кампании холодных звонков');
+  console.log('  GET /api/get-contacts-to-call - Получить контакты для обзвона');
+  console.log('  GET /api/campaign-stats - Статистика кампаний');
+  console.log('  POST /api/pause-campaign - Остановка кампании');
+  console.log('  GET /api/active-calls - Активные звонки');
+  console.log('  GET /health - Статус системы');
+  console.log('');
+  console.log('🎯 Интеграция с n8n готова!');
+  console.log('🔄 Холодные звонки через Zadarma настроены');
+  console.log('💾 Supabase интеграция активна');
+});// === МАССОВЫЙ ОБЗВОН ИЗ БАЗЫ SUPABASE ===
+app.post('/api/start-cold-calling-campaign', async (req, res) => {
+  try {
+    const { campaign_name, max_calls = 10, priority = 'normal' } = req.body;
+    
+    if (!client) {
+      return res.status(500).json({ error: 'Twilio не настроен' });
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase не настроен' });
+    }
+
+    console.log(`🚀 Запуск кампании холодных звонков: ${campaign_name}`);
+
+    // Получаем контакты для обзвона
+    const contactsResponse = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?select=*&or=(call_status.is.null,call_status.eq.failed,next_call_date.lte.${new Date().toISOString()})&priority.eq.${priority}&limit=${max_calls}`, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    if (!contactsResponse.ok) {
+      throw new Error('Ошибка получения контактов из Supabase');
+    }
+
+    const contacts = await contactsResponse.json();
+    
+    if (contacts.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Нет контактов для обзвона',
+        campaign_name,
+        contacts_found: 0
+      });
+    }
+
+    console.log(`📞 Найдено ${contacts.length} контактов для обзвона`);
+
+    const results = [];
+    let successCount = 0;
+
+    // Запускаем звонки с интервалом
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+      
+      try {
+        const cleanNumber = normalizePhoneNumber(contact.phone_number);
+        
+        if (!cleanNumber) {
+          console.log(`❌ Некорректный номер: ${contact.phone_number}`);
+          results.push({
+            contact_id: contact.id,
+            phone: contact.phone_number,
+            status: 'failed',
+            error: 'Некорректный номер'
+          });
+          continue;
+        }
+
+        // Создаем звонок
+        const call = await client.calls.create({
+          to: `sip:${cleanNumber}@pbx.zadarma.com`,
+          from: '+380914811639',
+          sipAuthUsername: process.env.ZADARMA_SIP_USER,
+          sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+          url: `${BASE_URL}/handle-cold-call?contact_id=${contact.id}&phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}&campaign=${encodeURIComponent(campaign_name)}`,
+          statusCallback: `${BASE_URL}/cold-call-status`,
+          record: true,
+          timeout: 30
+        });
+
+        // Сохраняем в базу
+        await saveCallToSupabase(contact.id, call.sid, contact.phone_number, contact.contact_name, 'initiated');
+
+        results.push({
+          contact_id: contact.id,
+          phone: contact.phone_number,
+          call_sid: call.sid,
+          status: 'initiated'
+        });
+
+        successCount++;
+        console.log(`✅ Звонок ${i+1}/${contacts.length} инициирован: ${contact.phone_number} (${call.sid})`);
+
+        // Пауза между звонками (30-60 секунд)
+        if (i < contacts.length - 1) {
+          const delay = 30000 + Math.random() * 30000; // 30-60 сек
+          console.log(`⏱️  Пауза ${Math.round(delay/1000)} секунд до следующего звонка`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+      } catch (error) {
+        console.log(`❌ Ошибка звонка на ${contact.phone_number}: ${error.message}`);
+        results.push({
+          contact_id: contact.id,
+          phone: contact.phone_number,
+          error: error.message,
+          status: 'failed'
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      campaign_name,
+      total_contacts: contacts.length,
+      successful_calls: successCount,
+      failed_calls: contacts.length - successCount,
+      results: results,
+      next_batch_in: '30 минут'
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка кампании холодных звонков:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === ПОЛУЧЕНИЕ КОНТАКТОВ ДЛЯ ОБЗВОНА ===
+app.get('/api/get-contacts-to-call', async (req, res) => {
+  try {
+    const { limit = 50, priority = 'normal' } = req.query;
+    
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase не настроен' });
+    }
+
+    // Контакты готовые к обзвону
+    const response = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?select=*&or=(call_status.is.null,call_status.eq.failed,next_call_date.lte.${new Date().toISOString()})&priority.eq.${priority}&limit=${limit}`, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    const contacts = await response.json();
+
+    res.json({
+      success: true,
+      contacts: contacts,
+      count: contacts.length,
+      ready_to_call: contacts.filter(c => !c.call_status || c.call_status === 'failed').length,
+      scheduled_callbacks: contacts.filter(c => c.next_call_date).length
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения контактов:', error);
+    res.status(500).json({ error: error.message });
+  }
+});const express = require('express');
 const twilio = require('twilio');
 const OpenAI = require('openai');
 
@@ -170,10 +443,17 @@ app.post('/handle-outbound-call', (req, res) => {
 
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Приветственное сообщение
-  const greeting = generateGreeting(customerName);
+  // Приветственное сообщение через n8n агента
+  const sessionId = `voice_${callSid}`;
+  const greeting = await callN8NAgent(
+    'Привіт! Це дзвінок від EMME3D про 3D друк автозапчастин. У вас є хвилинка?',
+    sessionId,
+    customerPhone,
+    customerName
+  );
+
   twiml.say({
-    voice: 'Polly.Joanna',
+    voice: 'Polly.Joanna-Neural', // Используем нейронный голос
     language: 'uk-UA'
   }, greeting);
 
@@ -240,8 +520,14 @@ app.post('/process-customer-response', async (req, res) => {
       timestamp: new Date()
     });
 
-    // Генерируем ответ AI
-    const aiResponse = await generateAIResponse(conversation);
+    // Генерируем ответ через n8n агента вместо OpenAI
+    const sessionId = `voice_${callSid}`;
+    const aiResponse = await callN8NAgent(
+      speechResult, 
+      sessionId, 
+      conversation.phone, 
+      conversation.name
+    );
     
     conversation.messages.push({ 
       role: 'assistant', 
@@ -252,10 +538,11 @@ app.post('/process-customer-response', async (req, res) => {
     // Обновляем стадию разговора
     updateConversationStage(conversation, speechResult, aiResponse);
 
-    // Проигрываем ответ AI
+    // Проигрываем ответ AI с улучшенными настройками украинского голоса
     twiml.say({
-      voice: 'Polly.Joanna',
-      language: 'uk-UA'
+      voice: 'Polly.Joanna-Neural', // Нейронный голос для лучшего качества
+      language: 'uk-UA',
+      rate: '0.9' // Чуть медленнее для лучшего понимания
     }, aiResponse);
 
     // Определяем следующее действие
@@ -313,50 +600,55 @@ function generateGreeting(customerName) {
   return greetings[Math.floor(Math.random() * greetings.length)];
 }
 
-// === ГЕНЕРАЦИЯ AI ОТВЕТА ===
-async function generateAIResponse(conversation) {
-  if (!openai) {
-    return 'Вибачте, технічна проблема з AI. Зателефонуйте нам пізніше на +380914811639.';
-  }
-
-  const systemPrompt = `Ти - Олена, менеджер по продажах компанії EMME3D (emme3d.com.ua), що спеціалізується на 3D-друці автозапчастин.
-
-МЕТА: Познайомити клієнта з послугами та отримати зацікавленість в консультації.
-
-ВАЖЛИВІ ПРАВИЛА:
-1. Говори КОРОТКО - максимум 1-2 речення
-2. Будь природною та дружньою  
-3. Не наполягай якщо клієнт не цікавиться
-4. Фокусуйся на вирішенні проблем клієнта
-5. Завжди пропонуй конкретну допомогу
-
-ІНФОРМАЦІЯ:
-- Друкуємо рідкісні автозапчастини які важко знайти
-- Працюємо з усіма марками авто
-- Швидке виготовлення: 1-3 дні
-- Висока якість друку PLA/ABS/PETG
-- Можемо зробити деталь по фото, кресленню або зразку
-- Телефон: +380914811639
-- Сайт: emme3d.com.ua
-
-Стадія розмови: ${conversation.stage}
-Телефон клієнта: ${conversation.phone}`;
-
+// === ИНТЕГРАЦИЯ С N8N АГЕНТОМ ===
+async function callN8NAgent(userMessage, sessionId, customerPhone, customerName) {
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...conversation.messages.slice(-6)
-      ],
-      max_tokens: 80,
-      temperature: 0.8
+    const webhookUrl = 'https://salesdrive.n8n.cloud/webhook/af770e75-f953-446c-bcd0-92a7fae8e0ac';
+    
+    const payload = {
+      message: {
+        text: userMessage,
+        from: {
+          id: sessionId,
+          username: customerName || 'Voice_Client',
+          first_name: customerName?.split(' ')[0] || 'Клиент',
+          phone: customerPhone
+        },
+        chat: {
+          id: sessionId
+        }
+      },
+      update_id: Date.now()
+    };
+
+    console.log('📤 Отправляем в n8n агента:', payload);
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      timeout: 15000 // 15 секунд таймаут
     });
 
-    return completion.choices[0].message.content;
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.text();
+    console.log('📥 Ответ от n8n агента:', result);
+
+    // Если ответ пустой или только пробелы
+    if (!result || result.trim().length === 0) {
+      return 'Вибачте, не зміг обробити ваш запит. Спробуйте ще раз.';
+    }
+
+    return result.trim();
+
   } catch (error) {
-    console.error('❌ Ошибка OpenAI:', error);
-    return 'Вибачте, можете повторити? Не зовсім вас зрозумів.';
+    console.error('❌ Ошибка вызова n8n агента:', error);
+    return 'Вибачте, виникла технічна проблема. Зателефонуйте нам пізніше на +380914811639.';
   }
 }
 
@@ -379,37 +671,200 @@ function updateConversationStage(conversation, userInput, aiResponse) {
 // === ОПРЕДЕЛЕНИЕ ЗАВЕРШЕНИЯ ЗВОНКА ===
 function shouldEndCall(aiResponse, conversation) {
   const response = aiResponse.toLowerCase();
-  const maxDuration = 3 * 60 * 1000; // 3 минуты максимум
+  const maxDuration = 4 * 60 * 1000; // 4 минуты максимум для n8n агента
   const currentDuration = new Date() - conversation.startTime;
   
-  return (
-    response.includes('до побачення') ||
-    response.includes('гарного дня') ||
+  // Проверяем ключевые фразы завершения
+  const endPhrases = [
+    'до побачення', 'гарного дня', 'дякую за час', 
+    'зателефонуємо пізніше', 'чекаємо на зв\'язок',
+    'заказ отправлен', 'заказ створено', '✅'
+  ];
+  
+  const shouldEnd = endPhrases.some(phrase => response.includes(phrase)) ||
     conversation.stage === 'rejection' ||
-    conversation.messages.length > 10 ||
-    currentDuration > maxDuration
-  );
+    conversation.messages.length > 12 || // Больше сообщений для n8n агента
+    currentDuration > maxDuration;
+    
+  console.log(`🤔 Проверка завершения: ${shouldEnd}, stage: ${conversation.stage}, messages: ${conversation.messages.length}`);
+  
+  return shouldEnd;
 }
 
-// === СОХРАНЕНИЕ РЕЗУЛЬТАТА ЗВОНКА ===
-async function saveCallResult(conversation) {
+// === ДОБАВЛЯЕМ ФУНКЦИЮ СОХРАНЕНИЯ В SUPABASE ===
+async function saveCallToSupabase(contactId, callSid, phone, name, status, stage = 'greeting') {
   try {
-    const result = {
-      phone: conversation.phone,
-      name: conversation.name,
-      duration: Math.round((new Date() - conversation.startTime) / 1000),
-      messages_count: conversation.messages.length,
-      stage: conversation.stage,
-      transcript: conversation.messages,
-      completed_at: new Date().toISOString()
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.log('❌ Supabase не настроен');
+      return null;
+    }
+
+    const callData = {
+      contact_id: contactId,
+      call_sid: callSid,
+      phone_number: phone,
+      contact_name: name,
+      company: 'EMME3D',
+      call_status: status,
+      conversation_state: stage,
+      call_attempts: 1,
+      last_called_at: new Date().toISOString(),
+      call_duration: 0,
+      answered: status === 'answered',
+      interested: false,
+      lead_score: 0,
+      conversation_history: JSON.stringify([])
     };
 
-    console.log('📊 Результат звонка:', result);
-    // TODO: Интеграция с Supabase для сохранения результатов
-    
+    const response = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(callData)
+    });
+
+    if (!response.ok) {
+      // Если запись уже существует, обновляем
+      const updateResponse = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?phone_number=eq.${phone}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          call_sid: callSid,
+          call_status: status,
+          conversation_state: stage,
+          call_attempts: 1,
+          last_called_at: new Date().toISOString()
+        })
+      });
+      
+      console.log('✅ Обновлена запись в cold_call_contacts');
+      return updateResponse.ok;
+    }
+
+    console.log('✅ Сохранено в cold_call_contacts');
+    return true;
+
   } catch (error) {
-    console.error('❌ Ошибка сохранения результата:', error);
+    console.error('❌ Ошибка сохранения в Supabase:', error);
+    return false;
   }
+}
+
+// === ФУНКЦИЯ ОБНОВЛЕНИЯ РЕЗУЛЬТАТА ЗВОНКА ===
+async function updateCallResult(phone, callSid, conversation) {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) return;
+
+    const duration = Math.round((new Date() - conversation.startTime) / 1000);
+    const isInterested = conversation.stage === 'interested' || 
+                        conversation.stage === 'discussing_needs' ||
+                        conversation.messages.some(m => 
+                          m.content.toLowerCase().includes('цікав') || 
+                          m.content.toLowerCase().includes('так') ||
+                          m.content.toLowerCase().includes('заказ')
+                        );
+
+    const leadScore = calculateLeadScore(conversation);
+
+    await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?phone_number=eq.${phone}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        call_status: 'completed',
+        conversation_state: conversation.stage,
+        call_duration: duration,
+        answered: true,
+        interested: isInterested,
+        lead_score: leadScore,
+        conversation_history: JSON.stringify(conversation.messages),
+        next_call_date: isInterested ? null : getNextCallDate(conversation.stage),
+        last_result: getCallResult(conversation)
+      })
+    });
+
+    console.log('✅ Обновлен результат звонка в Supabase');
+
+  } catch (error) {
+    console.error('❌ Ошибка обновления результата:', error);
+  }
+}
+
+// === РАСЧЕТ СКОРИНГА ЛИДОВ ===
+function calculateLeadScore(conversation) {
+  let score = 0;
+  
+  // Длительность разговора
+  const duration = (new Date() - conversation.startTime) / 1000;
+  if (duration > 60) score += 20;
+  if (duration > 120) score += 30;
+  
+  // Количество сообщений
+  if (conversation.messages.length > 4) score += 25;
+  if (conversation.messages.length > 8) score += 25;
+  
+  // Ключевые слова интереса
+  const allMessages = conversation.messages.map(m => m.content.toLowerCase()).join(' ');
+  if (allMessages.includes('цікав') || allMessages.includes('так')) score += 30;
+  if (allMessages.includes('bmw') || allMessages.includes('audi') || allMessages.includes('mercedes')) score += 20;
+  if (allMessages.includes('запчасти') || allMessages.includes('деталь')) score += 25;
+  if (allMessages.includes('заказ') || allMessages.includes('купить')) score += 50;
+  
+  // Стадия разговора
+  switch (conversation.stage) {
+    case 'interested': score += 40; break;
+    case 'discussing_needs': score += 60; break;
+    case 'order_created': score += 100; break;
+    case 'rejection': score -= 20; break;
+  }
+  
+  return Math.min(Math.max(score, 0), 100);
+}
+
+// === ОПРЕДЕЛЕНИЕ СЛЕДУЮЩЕГО ЗВОНКА ===
+function getNextCallDate(stage) {
+  const now = new Date();
+  switch (stage) {
+    case 'rejection':
+      now.setDate(now.getDate() + 30); // Через месяц
+      break;
+    case 'maybe_later':
+      now.setDate(now.getDate() + 7); // Через неделю
+      break;
+    case 'no_answer':
+      now.setDate(now.getDate() + 3); // Через 3 дня
+      break;
+    default:
+      now.setDate(now.getDate() + 14); // Через 2 недели
+  }
+  return now.toISOString();
+}
+
+// === РЕЗУЛЬТАТ ЗВОНКА ===
+function getCallResult(conversation) {
+  if (conversation.stage === 'order_created') return 'Заказ создан';
+  if (conversation.stage === 'interested') return 'Проявил интерес';
+  if (conversation.stage === 'discussing_needs') return 'Обсуждали потребности';
+  if (conversation.stage === 'rejection') return 'Отказ';
+  if (conversation.stage === 'maybe_later') return 'Возможно позже';
+  return 'Разговор состоялся';
 }
 
 // === СТАТУС ЗВОНКОВ ===
@@ -575,12 +1030,223 @@ app.post('/handle-sip-call', (req, res) => {
   res.send(twiml.toString());
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
-  console.log('📞 Эндпоинты:');
-  console.log('  POST /api/make-ai-call - Одиночный AI звонок');  
-  console.log('  POST /api/bulk-ai-calls - Массовые AI звонки из n8n');
-  console.log('  GET /api/active-calls - Активные звонки');
-  console.log('  GET /health - Статус системы');
+// === ОБРАБОТКА ХОЛОДНЫХ ЗВОНКОВ ===
+app.post('/handle-cold-call', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const contactId = req.query.contact_id;
+  const customerPhone = req.query.phone;
+  const customerName = req.query.name;
+  const campaignName = req.query.campaign;
+
+  console.log(`📞 Холодный звонок ${callSid} контакту ${contactId}: ${customerPhone}`);
+
+  // Создаем контекст разговора для холодного звонка
+  activeConversations.set(callSid, {
+    type: 'cold_call',
+    contact_id: contactId,
+    phone: customerPhone,
+    name: customerName,
+    campaign: campaignName,
+    messages: [],
+    startTime: new Date(),
+    stage: 'greeting'
+  });
+
+  // Обновляем статус в базе
+  await saveCallToSupabase(contactId, callSid, customerPhone, customerName, 'answered', 'greeting');
+
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  // Приветствие через n8n агента с контекстом холодного звонка
+  const sessionId = `cold_call_${callSid}`;
+  const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми спеціалізуємося на 3D друці автозапчастин. У вас є хвилинка поговорити?`;
+  
+  const greeting = await callN8NAgent(
+    initialMessage,
+    sessionId,
+    customerPhone,
+    customerName
+  );
+
+  twiml.say({
+    voice: 'Polly.Joanna-Neural',
+    language: 'uk-UA',
+    rate: '0.85' // Чуть медленнее для холодного звонка
+  }, greeting);
+
+  // Ожидаем ответа клиента с расширенными настройками
+  const gather = twiml.gather({
+    speechTimeout: 'auto',
+    timeout: 12, // Больше времени для ответа при холодном звонке
+    speechModel: 'experimental_conversations',
+    language: 'uk-UA',
+    enhanced: true,
+    action: '/process-cold-call-response',
+    method: 'POST'
+  });
+
+  // Если клиент молчит долго
+  twiml.say({
+    voice: 'Polly.Joanna-Neural',
+    language: 'uk-UA'
+  }, 'Добре, зрозуміло. Дякую за час! Гарного дня!');
+  
+  twiml.hangup();
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// === ОБРАБОТКА ОТВЕТОВ В ХОЛОДНЫХ ЗВОНКАХ ===
+app.post('/process-cold-call-response', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const speechResult = req.body.SpeechResult;
+  const confidence = req.body.Confidence;
+
+  console.log(`🎤 Холодный звонок - клиент сказал: "${speechResult}" (уверенность: ${confidence})`);
+
+  const conversation = activeConversations.get(callSid);
+  if (!conversation) {
+    console.log('❌ Разговор не найден:', callSid);
+    return res.status(404).send('Разговор не найден');
+  }
+
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  try {
+    // Если речь не распознана четко
+    if (!speechResult || confidence < 0.4) { // Ниже порог для холодных звонков
+      twiml.say({
+        voice: 'Polly.Joanna-Neural',
+        language: 'uk-UA'
+      }, 'Вибачте, я не зрозумів. Можете повторити, будь ласка?');
+
+      const gather = twiml.gather({
+        speechTimeout: 'auto',
+        timeout: 10,
+        action: '/process-cold-call-response'
+      });
+
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // Добавляем сообщение клиента в контекст
+    conversation.messages.push({ 
+      role: 'user', 
+      content: speechResult,
+      timestamp: new Date()
+    });
+
+    // Генерируем ответ через n8n агента с пометкой холодного звонка
+    const sessionId = `cold_call_${callSid}`;
+    const contextMessage = `ХОЛОДНЫЙ_ЗВОНОК_ОТВЕТ: ${speechResult}`;
+    
+    const aiResponse = await callN8NAgent(
+      contextMessage,
+      sessionId, 
+      conversation.phone, 
+      conversation.name
+    );
+    
+    conversation.messages.push({ 
+      role: 'assistant', 
+      content: aiResponse,
+      timestamp: new Date()
+    });
+
+    // Обновляем стадию разговора для холодного звонка
+    updateColdCallStage(conversation, speechResult, aiResponse);
+
+    // Проигрываем ответ AI
+    twiml.say({
+      voice: 'Polly.Joanna-Neural',
+      language: 'uk-UA',
+      rate: '0.85'
+    }, aiResponse);
+
+    // Определяем следующее действие
+    if (shouldEndCall(aiResponse, conversation)) {
+      twiml.say({
+        voice: 'Polly.Joanna-Neural',
+        language: 'uk-UA'
+      }, 'Дякую за час! Гарного дня!');
+      twiml.hangup();
+      
+      // Сохраняем результат холодного звонка
+      await updateCallResult(conversation.phone, callSid, conversation);
+      activeConversations.delete(callSid);
+      
+    } else {
+      // Продолжаем разговор
+      const gather = twiml.gather({
+        speechTimeout: 'auto',
+        timeout: 15,
+        action: '/process-cold-call-response',
+        speechModel: 'experimental_conversations',
+        language: 'uk-UA'
+      });
+
+      twiml.say({
+        voice: 'Polly.Joanna-Neural',
+        language: 'uk-UA'
+      }, 'Дякую за увагу! До побачення!');
+      twiml.hangup();
+    }
+
+    res.type('text/xml');
+    res.send(twiml.toString());
+
+  } catch (error) {
+    console.error('❌ Ошибка обработки холодного звонка:', error);
+    
+    twiml.say({
+      voice: 'Polly.Joanna-Neural',
+      language: 'uk-UA'
+    }, 'Вибачте, виникла технічна проблема. Дякую за час!');
+    twiml.hangup();
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+  }
+});
+
+// === ОБНОВЛЕНИЕ СТАДИИ ХОЛОДНОГО ЗВОНКА ===
+function updateColdCallStage(conversation, userInput, aiResponse) {
+  const input = userInput.toLowerCase();
+  const response = aiResponse.toLowerCase();
+  
+  // Определяем реакцию клиента на холодный звонок
+  if (input.includes('не цікав') || input.includes('не треба') || input.includes('не хочу') || 
+      input.includes('зайнят') || input.includes('некогда')) {
+    conversation.stage = 'rejection';
+  } else if (input.includes('цікав') || input.includes('так') || input.includes('розкажіть')) {
+    conversation.stage = 'interested';
+  } else if (input.includes('пізніше') || input.includes('передзвоніть')) {
+    conversation.stage = 'callback_requested';
+  } else if (input.includes('bmw') || input.includes('audi') || input.includes('mercedes') || 
+             input.includes('запчасти') || input.includes('автомобіль')) {
+    conversation.stage = 'discussing_needs';
+  } else if (response.includes('заказ') || response.includes('замовлення')) {
+    conversation.stage = 'order_process';
+  }
+  
+  console.log(`📊 Стадия холодного звонка обновлена: ${conversation.stage}`);
+}
+
+// === СТАТУС ХОЛОДНЫХ ЗВОНКОВ ===
+app.post('/cold-call-status', (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = req.body.CallStatus;
+  
+  console.log(`📊 Холодный звонок ${callSid}: статус ${callStatus}`);
+  
+  if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'no-answer') {
+    const conversation = activeConversations.get(callSid);
+    if (conversation && conversation.type === 'cold_call') {
+      updateCallResult(conversation.phone, callSid, conversation);
+      activeConversations.delete(callSid);
+    }
+  }
+  
+  res.status(200).send('OK');
 });
