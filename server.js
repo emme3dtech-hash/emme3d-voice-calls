@@ -77,23 +77,22 @@ app.post('/api/make-ai-call', async (req, res) => {
       });
     }
 
-    console.log(`📞 Инициируем AI звонок на ${phone_number}`);
-
-// Вариант 1: Без домена в from
-const call = await client.calls.create({
+  console.log(`📞 Инициируем AI звонок на ${phone_number}`);
+  
   // Очищаем номер от всех нецифровых символов
-      const cleanNumber = phone_number.replace(/[^0-9]/g, '');
-      console.log('Исходный номер:', phone_number);
-      console.log('Очищенный номер:', cleanNumber);
-      
-      const call = await client.calls.create({
-        to: `sip:${cleanNumber}@pbx.zadarma.com`,
-        from: '+380914811639',
-        sipAuthUsername: process.env.ZADARMA_SIP_USER,
-        sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-        url: `${BASE_URL}/handle-outbound-call`,
-        record: true
-      });
+  const cleanNumber = phone_number.replace(/[^0-9]/g, '');
+  console.log('Исходный номер:', phone_number);
+  console.log('Очищенный номер:', cleanNumber);
+  
+  const call = await client.calls.create({
+    to: `sip:${cleanNumber}@pbx.zadarma.com`,
+    from: '+380914811639',
+    sipAuthUsername: process.env.ZADARMA_SIP_USER,
+    sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+    url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+    statusCallback: `${BASE_URL}/call-status`,
+    record: true
+  });
   from: '+380914811639',  // обычный номер
   sipAuthUsername: process.env.ZADARMA_SIP_USER,
   sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
@@ -541,4 +540,5 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
 
