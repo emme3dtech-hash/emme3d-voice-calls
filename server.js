@@ -347,6 +347,9 @@ app.post('/api/start-cold-calling-campaign', async (req, res) => {
 /**
  * Обрабатывает первоначальное соединение для холодного звонка
  */
+/**
+ * Обрабатывает первоначальное соединение для холодного звонка
+ */
 app.post('/handle-cold-call', (req, res) => {
     const { CallSid } = req.body;
     const { contact_id, phone, name } = req.query;
@@ -363,30 +366,27 @@ app.post('/handle-cold-call', (req, res) => {
     saveCallToSupabase(contact_id, CallSid, phone, name, 'in-progress', 'greeting');
 
     const twiml = new twilio.twiml.VoiceResponse();
-    const greeting = `Привіт! Це горячі хвойди! Будешь замовляти 2 по ціні однієї. А?!`;
+    // ИЗМЕНЕНО: Приветствие на русском
+    const greeting = `Здравствуйте! Это Елена из компании EMME3D. Мы печатаем автозапчасти на 3D принтере. Вам удобно сейчас разговаривать?`;
     
-    // ИЗМЕНЕНО: Используем качественный и однозначный голос от Google WaveNet
-    twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, greeting);
+    // ИЗМЕНЕНО: Используем качественный русский нейронный голос
+    twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, greeting);
     
     const gather = twiml.gather({
         speechTimeout: 'auto',
         timeout: 10,
-        language: 'uk-UA',
+        language: 'ru-RU', // ИЗМЕНЕНО: Распознавание речи тоже на русском
         action: '/process-customer-response',
         method: 'POST'
     });
     
-    twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Дякую за увагу. Гарного дня!');
+    twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, 'Спасибо за внимание. Хорошего дня!');
     twiml.hangup();
 
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
-
-/**
- * Обрабатывает ответ клиента и взаимодействует с n8n
- */
 /**
  * Обрабатывает ответ клиента и взаимодействует с n8n
  */
@@ -403,7 +403,7 @@ app.post('/process-customer-response', async (req, res) => {
     
     try {
         if (!SpeechResult || Confidence < 0.4) {
-            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Вибачте, я вас не зрозуміла. Можете повторити?');
+            twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, 'Простите, я вас не поняла. Можете повторить?');
         } else {
             conversation.messages.push({ role: 'user', content: SpeechResult });
             updateConversationStage(conversation, SpeechResult);
@@ -413,7 +413,7 @@ app.post('/process-customer-response', async (req, res) => {
             
             conversation.messages.push({ role: 'assistant', content: aiResponse });
 
-            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, aiResponse);
+            twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, aiResponse);
             
             if (shouldEndCall(aiResponse, conversation)) {
                 twiml.hangup();
@@ -426,17 +426,17 @@ app.post('/process-customer-response', async (req, res) => {
             twiml.gather({
                 speechTimeout: 'auto',
                 timeout: 10,
-                language: 'uk-UA',
+                language: 'ru-RU', // ИЗМЕНЕНО: Распознавание речи тоже на русском
                 action: '/process-customer-response'
             });
-            twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Я вас не почула. Дякую за розмову, до побачення!');
+            twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, 'Я вас не услышала. Спасибо за разговор, до свидания!');
             twiml.hangup();
         }
 
         res.type('text/xml').send(twiml.toString());
     } catch (error) {
         console.error('❌ Ошибка обработки ответа клиента:', error);
-        twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, 'Вибачте, виникла технічна помилка.');
+        twiml.say({ voice: 'Polly.Tatyana-Neural', language: 'ru-RU' }, 'Простите, произошла техническая ошибка.');
         twiml.hangup();
         res.type('text/xml').send(twiml.toString());
     }
@@ -471,6 +471,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
 
