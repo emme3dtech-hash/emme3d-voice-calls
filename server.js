@@ -363,7 +363,7 @@ app.post('/handle-cold-call', (req, res) => {
     saveCallToSupabase(contact_id, CallSid, phone, name, 'in-progress', 'greeting');
 
     const twiml = new twilio.twiml.VoiceResponse();
-    const greeting = `Привіт! Це Олена з компанії EMME3D. Ми друкуємо автозапчастини на 3D принтері. Вам зручно зараз розмовляти?`;
+    const greeting = `Привіт! Це горячі хвойди! Будешь замовляти 2 по ціні однієї. А?!`;
     
     // ИЗМЕНЕНО: Используем качественный и однозначный голос от Google WaveNet
     twiml.say({ voice: 'uk-UA-Wavenet-A', language: 'uk-UA' }, greeting);
@@ -471,6 +471,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
 
 
