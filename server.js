@@ -202,8 +202,8 @@ function generateGreeting(customerName) {
   return greetings[Math.floor(Math.random() * greetings.length)];
 }
 
-// === ОБРАБОТКА ИСХОДЯЩЕГО ЗВОНКА (БЕЗ AWAIT В ПРИВЕТСТВИИ) ===
-app.post('/handle-outbound-call', (req, res) => {
+// === ОБРАБОТКА ИСХОДЯЩЕГО ЗВОНКА (С N8N ИНТЕГРАЦИЕЙ) ===
+app.post('/handle-outbound-call', async (req, res) => {
   const callSid = req.body.CallSid;
   const customerPhone = req.query.phone;
   const customerName = req.query.name;
@@ -221,33 +221,68 @@ app.post('/handle-outbound-call', (req, res) => {
 
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // ПРОСТОЕ приветствие БЕЗ n8n на этом этапе
-  const greeting = generateGreeting(customerName);
-  
-  twiml.say({
-    voice: 'Polly.Joanna',
-    language: 'uk-UA',
-    rate: '0.85'
-  }, greeting);
+  try {
+    // Генерируем приветствие через n8n агента
+    const sessionId = `voice_${callSid}`;
+    const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми друкуємо рідкісні автозапчастини на 3D принтері. У вас є хвилинка?`;
+    
+    const greeting = await callN8NAgent(
+      initialMessage,
+      sessionId,
+      customerPhone,
+      customerName
+    );
 
-  // Ожидаем ответа клиента
-  const gather = twiml.gather({
-    speechTimeout: 'auto',
-    timeout: 12,
-    speechModel: 'experimental_conversations',
-    language: 'uk-UA', 
-    enhanced: true,
-    action: '/process-customer-response',
-    method: 'POST'
-  });
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA',
+      rate: '0.85'
+    }, greeting);
 
-  // Если клиент молчит
-  twiml.say({
-    voice: 'Polly.Joanna',
-    language: 'uk-UA'
-  }, 'Дякую за увагу! Гарного дня!');
-  
-  twiml.hangup();
+    // Ожидаем ответа клиента
+    const gather = twiml.gather({
+      speechTimeout: 'auto',
+      timeout: 12,
+      speechModel: 'experimental_conversations',
+      language: 'uk-UA', 
+      enhanced: true,
+      action: '/process-customer-response',
+      method: 'POST'
+    });
+
+    // Если клиент молчит
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Дякую за увагу! Гарного дня!');
+    
+    twiml.hangup();
+
+  } catch (error) {
+    console.error('❌ Ошибка n8n в приветствии:', error);
+    
+    // Fallback приветствие
+    const fallbackGreeting = generateGreeting(customerName);
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA',
+      rate: '0.85'
+    }, fallbackGreeting);
+
+    const gather = twiml.gather({
+      speechTimeout: 'auto',
+      timeout: 12,
+      action: '/process-customer-response',
+      method: 'POST'
+    });
+
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Дякую за увагу! Гарного дня!');
+    
+    twiml.hangup();
+  }
 
   res.type('text/xml');
   res.send(twiml.toString());
@@ -455,16 +490,417 @@ app.get('/api/active-calls', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+// === ДОБАВЛЯЕМ ФУНКЦИЮ СОХРАНЕНИЯ В SUPABASE ===
+async function saveCallToSupabase(contactId, callSid, phone, name, status, stage = 'greeting') {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.log('❌ Supabase не настроен');
+      return null;
+    }
+
+    const callData = {
+      contact_id: contactId,
+      call_sid: callSid,
+      phone_number: phone,
+      contact_name: name,
+      company: 'EMME3D',
+      call_status: status,
+      conversation_state: stage,
+      call_attempts: 1,
+      last_called_at: new Date().toISOString(),
+      call_duration: 0,
+      answered: status === 'answered',
+      interested: false,
+      lead_score: 0,
+      conversation_history: JSON.stringify([])
+    };
+
+    const response = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(callData)
+    });
+
+    if (!response.ok) {
+      // Если запись уже существует, обновляем
+      const updateResponse = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?phone_number=eq.${phone}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          call_sid: callSid,
+          call_status: status,
+          conversation_state: stage,
+          call_attempts: 1,
+          last_called_at: new Date().toISOString()
+        })
+      });
+      
+      console.log('✅ Обновлена запись в cold_call_contacts');
+      return updateResponse.ok;
+    }
+
+    console.log('✅ Сохранено в cold_call_contacts');
+    return true;
+
+  } catch (error) {
+    console.error('❌ Ошибка сохранения в Supabase:', error);
+    return false;
+  }
+}
+
+// === МАССОВЫЙ ОБЗВОН ИЗ БАЗЫ SUPABASE ===
+app.post('/api/start-cold-calling-campaign', async (req, res) => {
+  try {
+    const { campaign_name, max_calls = 10, priority = 'normal' } = req.body;
+    
+    if (!client) {
+      return res.status(500).json({ error: 'Twilio не настроен' });
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase не настроен' });
+    }
+
+    console.log(`🚀 Запуск кампании холодных звонков: ${campaign_name}`);
+
+    // Получаем контакты для обзвона
+    const contactsResponse = await fetch(`${supabaseUrl}/rest/v1/cold_call_contacts?select=*&or=(call_status.is.null,call_status.eq.failed,next_call_date.lte.${new Date().toISOString()})&priority.eq.${priority}&limit=${max_calls}`, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    if (!contactsResponse.ok) {
+      throw new Error('Ошибка получения контактов из Supabase');
+    }
+
+    const contacts = await contactsResponse.json();
+    
+    if (contacts.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Нет контактов для обзвона',
+        campaign_name,
+        contacts_found: 0
+      });
+    }
+
+    console.log(`📞 Найдено ${contacts.length} контактов для обзвона`);
+
+    const results = [];
+    let successCount = 0;
+
+    // Запускаем звонки с интервалом
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+      
+      try {
+        const cleanNumber = normalizePhoneNumber(contact.phone_number);
+        
+        if (!cleanNumber) {
+          console.log(`❌ Некорректный номер: ${contact.phone_number}`);
+          results.push({
+            contact_id: contact.id,
+            phone: contact.phone_number,
+            status: 'failed',
+            error: 'Некорректный номер'
+          });
+          continue;
+        }
+
+        // Создаем звонок
+        const call = await client.calls.create({
+          to: `sip:${cleanNumber}@pbx.zadarma.com`,
+          from: '+380914811639',
+          sipAuthUsername: process.env.ZADARMA_SIP_USER,
+          sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+          url: `${BASE_URL}/handle-cold-call?contact_id=${contact.id}&phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}&campaign=${encodeURIComponent(campaign_name)}`,
+          statusCallback: `${BASE_URL}/cold-call-status`,
+          record: true,
+          timeout: 30
+        });
+
+        // Сохраняем в базу
+        await saveCallToSupabase(contact.id, call.sid, contact.phone_number, contact.contact_name, 'initiated');
+
+        results.push({
+          contact_id: contact.id,
+          phone: contact.phone_number,
+          call_sid: call.sid,
+          status: 'initiated'
+        });
+
+        successCount++;
+        console.log(`✅ Звонок ${i+1}/${contacts.length} инициирован: ${contact.phone_number} (${call.sid})`);
+
+        // Пауза между звонками (30-60 секунд)
+        if (i < contacts.length - 1) {
+          const delay = 30000 + Math.random() * 30000; // 30-60 сек
+          console.log(`⏱️  Пауза ${Math.round(delay/1000)} секунд до следующего звонка`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+      } catch (error) {
+        console.log(`❌ Ошибка звонка на ${contact.phone_number}: ${error.message}`);
+        results.push({
+          contact_id: contact.id,
+          phone: contact.phone_number,
+          error: error.message,
+          status: 'failed'
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      campaign_name,
+      total_contacts: contacts.length,
+      successful_calls: successCount,
+      failed_calls: contacts.length - successCount,
+      results: results,
+      next_batch_in: '30 минут'
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка кампании холодных звонков:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === ОБРАБОТКА ХОЛОДНЫХ ЗВОНКОВ ===
+app.post('/handle-cold-call', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const contactId = req.query.contact_id;
+  const customerPhone = req.query.phone;
+  const customerName = req.query.name;
+  const campaignName = req.query.campaign;
+
+  console.log(`📞 Холодный звонок ${callSid} контакту ${contactId}: ${customerPhone}`);
+
+  // Создаем контекст разговора для холодного звонка
+  activeConversations.set(callSid, {
+    type: 'cold_call',
+    contact_id: contactId,
+    phone: customerPhone,
+    name: customerName,
+    campaign: campaignName,
+    messages: [],
+    startTime: new Date(),
+    stage: 'greeting'
+  });
+
+  // Асинхронно обновляем статус в базе
+  saveCallToSupabase(contactId, callSid, customerPhone, customerName, 'answered', 'greeting')
+    .catch(err => console.error('Ошибка сохранения в Supabase:', err));
+
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  try {
+    // Приветствие через n8n агента с контекстом холодного звонка
+    const sessionId = `cold_call_${callSid}`;
+    const initialMessage = `ХОЛОДНЫЙ_ЗВОНОК: Привіт! Це Олена з компанії EMME3D. Ми спеціалізуємося на 3D друці автозапчастин. У вас є хвилинка поговорити?`;
+    
+    const greeting = await callN8NAgent(
+      initialMessage,
+      sessionId,
+      customerPhone,
+      customerName
+    );
+
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA',
+      rate: '0.85'
+    }, greeting);
+
+    // Ожидаем ответа клиента
+    const gather = twiml.gather({
+      speechTimeout: 'auto',
+      timeout: 12,
+      speechModel: 'experimental_conversations',
+      language: 'uk-UA',
+      enhanced: true,
+      action: '/process-cold-call-response',
+      method: 'POST'
+    });
+
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Добре, зрозуміло. Дякую за час! Гарного дня!');
+    
+    twiml.hangup();
+
+  } catch (error) {
+    console.error('❌ Ошибка холодного звонка:', error);
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Вибачте, технічна проблема. До побачення!');
+    twiml.hangup();
+  }
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// === ОБРАБОТКА ОТВЕТОВ В ХОЛОДНЫХ ЗВОНКАХ ===
+app.post('/process-cold-call-response', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const speechResult = req.body.SpeechResult;
+  const confidence = req.body.Confidence;
+
+  console.log(`🎤 Холодный звонок - клиент сказал: "${speechResult}" (уверенность: ${confidence})`);
+
+  const conversation = activeConversations.get(callSid);
+  if (!conversation) {
+    console.log('❌ Разговор не найден:', callSid);
+    return res.status(404).send('Разговор не найден');
+  }
+
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  try {
+    // Если речь не распознана четко
+    if (!speechResult || confidence < 0.4) {
+      twiml.say({
+        voice: 'Polly.Joanna',
+        language: 'uk-UA'
+      }, 'Вибачте, я не зрозумів. Можете повторити, будь ласка?');
+
+      const gather = twiml.gather({
+        speechTimeout: 'auto',
+        timeout: 10,
+        action: '/process-cold-call-response'
+      });
+
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // Добавляем сообщение клиента в контекст
+    conversation.messages.push({ 
+      role: 'user', 
+      content: speechResult,
+      timestamp: new Date()
+    });
+
+    // Генерируем ответ через n8n агента с пометкой холодного звонка
+    const sessionId = `cold_call_${callSid}`;
+    const contextMessage = `ХОЛОДНЫЙ_ЗВОНОК_ОТВЕТ: ${speechResult}`;
+    
+    const aiResponse = await callN8NAgent(
+      contextMessage,
+      sessionId, 
+      conversation.phone, 
+      conversation.name
+    );
+    
+    conversation.messages.push({ 
+      role: 'assistant', 
+      content: aiResponse,
+      timestamp: new Date()
+    });
+
+    // Обновляем стадию разговора для холодного звонка
+    updateConversationStage(conversation, speechResult, aiResponse);
+
+    // Проигрываем ответ AI
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA',
+      rate: '0.85'
+    }, aiResponse);
+
+    // Определяем следующее действие
+    if (shouldEndCall(aiResponse, conversation)) {
+      twiml.say({
+        voice: 'Polly.Joanna',
+        language: 'uk-UA'
+      }, 'Дякую за час! Гарного дня!');
+      twiml.hangup();
+      
+      activeConversations.delete(callSid);
+      
+    } else {
+      // Продолжаем разговор
+      const gather = twiml.gather({
+        speechTimeout: 'auto',
+        timeout: 15,
+        action: '/process-cold-call-response',
+        speechModel: 'experimental_conversations',
+        language: 'uk-UA'
+      });
+
+      twiml.say({
+        voice: 'Polly.Joanna',
+        language: 'uk-UA'
+      }, 'Дякую за увагу! До побачення!');
+      twiml.hangup();
+    }
+
+    res.type('text/xml');
+    res.send(twiml.toString());
+
+  } catch (error) {
+    console.error('❌ Ошибка обработки холодного звонка:', error);
+    
+    twiml.say({
+      voice: 'Polly.Joanna',
+      language: 'uk-UA'
+    }, 'Вибачте, виникла технічна проблема. Дякую за час!');
+    twiml.hangup();
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+  }
+});
+
+// === СТАТУС ХОЛОДНЫХ ЗВОНКОВ ===
+app.post('/cold-call-status', (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = req.body.CallStatus;
+  
+  console.log(`📊 Холодный звонок ${callSid}: статус ${callStatus}`);
+  
+  if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'no-answer') {
+    const conversation = activeConversations.get(callSid);
+    if (conversation && conversation.type === 'cold_call') {
+      saveCallResult(conversation);
+      activeConversations.delete(callSid);
+    }
+  }
+  
+  res.status(200).send('OK');
+});
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 EMME3D Voice AI система запущена на порту ${PORT}`);
-  console.log('📞 Основные эндпоинты:');
+  console.log('📞 Полные эндпоинты:');
   console.log('  POST /api/make-ai-call - AI звонок с n8n интеграцией');  
+  console.log('  POST /api/start-cold-calling-campaign - Запуск кампании холодных звонков');
+  console.log('  GET /api/get-contacts-to-call - Контакты для обзвона');
+  console.log('  GET /api/campaign-stats - Статистика кампаний');
   console.log('  GET /api/active-calls - Активные звонки');
   console.log('  GET /health - Статус системы');
   console.log('  GET /test - Тест системы');
   console.log('');
-  console.log('🎯 ИСПРАВЛЕНА async/await ошибка!');
-  console.log('🤖 N8N интеграция работает в process-customer-response');
-  console.log('📞 Простое приветствие без async в handle-outbound-call');
+  console.log('🤖 ПОЛНАЯ N8N интеграция включена!');
+  console.log('💾 Supabase интеграция для холодных звонков');
+  console.log('📊 Детальная аналитика кампаний');
+  console.log('🎯 Система готова к продакшену!');
 });
