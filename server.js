@@ -81,7 +81,19 @@ app.post('/api/make-ai-call', async (req, res) => {
 
 // Вариант 1: Без домена в from
 const call = await client.calls.create({
-  to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
+  // Очищаем номер от всех нецифровых символов
+      const cleanNumber = phone_number.replace(/[^0-9]/g, '');
+      console.log('Исходный номер:', phone_number);
+      console.log('Очищенный номер:', cleanNumber);
+      
+      const call = await client.calls.create({
+        to: `sip:${cleanNumber}@pbx.zadarma.com`,
+        from: '+380914811639',
+        sipAuthUsername: process.env.ZADARMA_SIP_USER,
+        sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
+        url: `${BASE_URL}/handle-outbound-call`,
+        record: true
+      });
   from: '+380914811639',  // обычный номер
   sipAuthUsername: process.env.ZADARMA_SIP_USER,
   sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
@@ -406,14 +418,15 @@ app.post('/api/bulk-ai-calls', async (req, res) => {
     
     for (let i = 0; i < contacts.length; i++) {
       const contact = contacts[i];
+      const cleanNumber = contact.phone_number.replace(/[^0-9]/g, '');
       
       try {
         const call = await client.calls.create({
-          to: `sip:${phone_number.replace('+', '')}@pbx.zadarma.com`,
-          from: `380914811639@380914811639.sip.twilio.com`,
+          to: `sip:${cleanNumber}@pbx.zadarma.com`,
+          from: '+380914811639',
           sipAuthUsername: process.env.ZADARMA_SIP_USER,
           sipAuthPassword: process.env.ZADARMA_SIP_PASSWORD,
-          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(phone_number)}&name=${encodeURIComponent(customer_name || '')}`,
+          url: `${BASE_URL}/handle-outbound-call?phone=${encodeURIComponent(contact.phone_number)}&name=${encodeURIComponent(contact.contact_name || '')}`,
           statusCallback: `${BASE_URL}/call-status`,
           record: true
         });
@@ -528,3 +541,4 @@ app.post('/handle-sip-call', (req, res) => {
   res.type('text/xml');
   res.send(twiml.toString());
 });
+
