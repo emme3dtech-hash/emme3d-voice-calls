@@ -279,6 +279,9 @@ app.get('/ping-n8n', async (req, res) => {
 
 // === 4. ОБРАБОТЧИКИ TWILIO (TwiML) ===
 
+/**
+ * Обрабатывает первоначальное соединение для холодного звонка
+ */
 app.post('/handle-cold-call', (req, res) => {
     const { CallSid } = req.body;
     const { contact_id, phone, name } = req.query;
@@ -306,7 +309,7 @@ app.post('/handle-cold-call', (req, res) => {
         action: '/process-customer-response',
         method: 'POST',
         enhanced: true,
-        speechModel: 'experimental_conversations'
+        speechModel: 'phone_call' // ИЗМЕНЕНО: на совместимую модель
     });
     
     twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, 'Спасибо за внимание. Хорошего дня!');
@@ -316,6 +319,9 @@ app.post('/handle-cold-call', (req, res) => {
     res.send(twiml.toString());
 });
 
+/**
+ * Обрабатывает ответ клиента и взаимодействует с n8n
+ */
 app.post('/process-customer-response', async (req, res) => {
     const { CallSid, SpeechResult, Confidence } = req.body;
     console.log(`🎤 Клиент сказал: "${SpeechResult}" (уверенность: ${Confidence})`);
@@ -355,7 +361,7 @@ app.post('/process-customer-response', async (req, res) => {
                 language: 'ru-RU',
                 action: '/process-customer-response',
                 enhanced: true,
-                speechModel: 'experimental_conversations'
+                speechModel: 'phone_call' // ИЗМЕНЕНО: на совместимую модель
             });
             twiml.say({ voice: 'Polly.Tatyana', language: 'ru-RU' }, 'Я вас не услышала. Спасибо за разговор, до свидания!');
             twiml.hangup();
@@ -395,4 +401,5 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Базовый URL: ${BASE_URL}`);
     console.log(`🔗 n8n Webhook URL: ${N8N_VOICE_WEBHOOK_URL}\n`);
 });
+
 
